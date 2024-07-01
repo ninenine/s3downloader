@@ -19,11 +19,13 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3/s3manager"
 )
 
+// Downloader struct handles AWS sessions and S3 operations
 type Downloader struct {
 	sess *session.Session
 	s3   *s3.S3
 }
 
+// NewDownloader initializes a new Downloader with AWS credentials
 func NewDownloader(region, accessKey, secretKey string) (*Downloader, error) {
 	config := &aws.Config{
 		Region: aws.String(region),
@@ -38,6 +40,7 @@ func NewDownloader(region, accessKey, secretKey string) (*Downloader, error) {
 	return &Downloader{sess: sess, s3: s3.New(sess)}, nil
 }
 
+// ListAndDownloadObjects lists and downloads S3 objects concurrently
 func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix, downloadPath string, progressChan chan<- progress.Progress) error {
 	const (
 		maxWorkers        = 50
@@ -53,6 +56,7 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 
 	fileChan := make(chan *s3.Object, channelBufferSize)
 	errChan := make(chan error, maxWorkers)
+	doneChan := make(chan struct{})
 	var wg sync.WaitGroup
 
 	downloader := s3manager.NewDownloader(d.sess, func(d *s3manager.Downloader) {
@@ -87,6 +91,7 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 		if err != nil {
 			errChan <- fmt.Errorf("error listing objects: %w", err)
 		}
+		close(doneChan)
 	}()
 
 	go func() {
@@ -94,6 +99,15 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 		close(errChan)
 	}()
 
+	select {
+	case <-doneChan:
+		// Listing completed
+	case <-ctx.Done():
+		// Context canceled
+		return ctx.Err()
+	}
+
+	// Check for errors from downloading
 	for err := range errChan {
 		if err != nil {
 			return err
@@ -103,6 +117,7 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 	return nil
 }
 
+// downloadWorker processes the download of each file
 func (d *Downloader) downloadWorker(ctx context.Context, bucket, downloadPath string, downloader *s3manager.Downloader,
 	fileChan <-chan *s3.Object, errChan chan<- error, wg *sync.WaitGroup,
 	processedFiles, skippedFiles *int64, progressChan chan<- progress.Progress) {
@@ -141,6 +156,7 @@ func (d *Downloader) downloadWorker(ctx context.Context, bucket, downloadPath st
 	}
 }
 
+// downloadFile downloads a single file from S3
 func (d *Downloader) downloadFile(ctx context.Context, downloader *s3manager.Downloader, bucket string, key *string, localPath string) error {
 	f, err := os.Create(localPath)
 	if err != nil {
@@ -164,6 +180,7 @@ func (d *Downloader) downloadFile(ctx context.Context, downloader *s3manager.Dow
 	return nil
 }
 
+// ListPrefixes lists prefixes (subdirectories) within a given S3 bucket and prefix
 func (d *Downloader) ListPrefixes(bucket, prefix string) ([]string, error) {
 	var prefixes []string
 	err := d.s3.ListObjectsV2Pages(&s3.ListObjectsV2Input{

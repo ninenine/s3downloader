@@ -4,6 +4,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 )
 
+// Components struct holds all the UI components for the application
 type Components struct {
 	BucketEntry       *widget.Entry
 	PrefixEntry       *widget.Entry
@@ -19,6 +20,7 @@ type Components struct {
 	ProgressBar       *widget.ProgressBar
 }
 
+// NewComponents initializes all the UI components
 func NewComponents() *Components {
 	c := &Components{
 		BucketEntry:       widget.NewEntry(),
