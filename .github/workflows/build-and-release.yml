@@ -20,7 +20,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Install system dependencies (Linux only)
         if: runner.os == 'Linux'
@@ -31,10 +31,11 @@ jobs:
       - name: Install system dependencies (macOS only)
         if: runner.os == 'macOS'
         run: |
-          brew install glfw
+          brew update
+          brew install glfw || true
 
       - name: Set up Go
-        uses: actions/setup-go@v2
+        uses: actions/setup-go@v4
         with:
           go-version: "1.22"
 
@@ -46,7 +47,7 @@ jobs:
           go build -o s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }} cmd/main.go
 
       - name: Archive production artifacts
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: s3downloader-${{ runner.os }}-${{ matrix.goarch }}
           path: s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }}
@@ -54,12 +55,14 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    if: success() || failure()
     steps:
       - name: Checkout code
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Download all build artifacts
-        uses: actions/download-artifact@v2
+        uses: actions/download-artifact@v3
+        continue-on-error: true
 
       - name: Create GitHub Release
         id: create_release
@@ -82,11 +85,16 @@ jobs:
 
             const assets = glob.sync('s3downloader-*');
             for (const asset of assets) {
-              await github.rest.repos.uploadReleaseAsset({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                release_id: ${{ steps.create_release.outputs.id }},
-                name: asset,
-                data: await fs.readFile(asset)
-              });
+              try {
+                await github.rest.repos.uploadReleaseAsset({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  release_id: ${{ steps.create_release.outputs.id }},
+                  name: asset,
+                  data: await fs.readFile(asset)
+                });
+                console.log(`Successfully uploaded ${asset}`);
+              } catch (error) {
+                console.error(`Failed to upload ${asset}: ${error.message}`);
+              }
             }
