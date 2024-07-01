@@ -85,17 +85,16 @@ jobs:
           github-token: ${{secrets.GITHUB_TOKEN}}
           script: |
             const fs = require('fs').promises;
-            const glob = require('glob');
-
             const assets = glob.sync('s3downloader-*');
             for (const asset of assets) {
               try {
+                const data = await fs.readFile(asset);
                 await github.rest.repos.uploadReleaseAsset({
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   release_id: ${{ steps.create_release.outputs.id }},
                   name: asset,
-                  data: await fs.readFile(asset)
+                  data: data
                 });
                 console.log(`Successfully uploaded ${asset}`);
               } catch (error) {
