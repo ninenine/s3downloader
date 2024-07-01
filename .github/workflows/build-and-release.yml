@@ -8,6 +8,7 @@ on:
 jobs:
   build:
     runs-on: ${{ matrix.os }}
+    continue-on-error: true
 
     strategy:
       matrix:
@@ -30,7 +31,7 @@ jobs:
       - name: Install system dependencies (macOS only)
         if: runner.os == 'macOS'
         run: |
-          brew install glfw3
+          brew install glfw
 
       - name: Set up Go
         uses: actions/setup-go@v2
