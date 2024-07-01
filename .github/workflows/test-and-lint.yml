@@ -38,6 +38,21 @@ jobs:
           version: v1.59.1
           args: --timeout 5m
 
+      - name: Install gosec
+        run: go install github.com/securego/gosec/v2/cmd/gosec@latest
+
+      - name: Run gosec
+        run: |
+          gosec ./...
+        continue-on-error: true # Continue the workflow even if gosec fails
+
+      - name: Archive gosec report
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: gosec-report
+          path: gosec_report.json
+
       - name: Archive test results
         if: always()
         uses: actions/upload-artifact@v2
@@ -45,6 +60,7 @@ jobs:
           name: test-results
           path: |
             **/test-results.xml
+
       - name: Archive lint results
         if: always()
         uses: actions/upload-artifact@v2
