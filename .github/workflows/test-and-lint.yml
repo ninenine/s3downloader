@@ -1,0 +1,49 @@
+name: Go CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - "**"
+
+jobs:
+  test-and-lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: "1.22"
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: go test ./... -v
+
+      - name: Lint code
+        uses: golangci/golangci-lint-action@v2
+        with:
+          version: v1.59.1
+          args: --timeout 5m
+
+      - name: Archive test results
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: test-results
+          path: |
+            **/test-results.xml
+      - name: Archive lint results
+        if: always()
+        uses: actions/upload-artifact@v2
+        with:
+          name: lint-results
+          path: |
+            **/lint-results.json
