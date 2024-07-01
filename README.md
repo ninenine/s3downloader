@@ -2,6 +2,8 @@
 
 S3 Downloader is a Go application with a graphical user interface that allows users to download files from Amazon S3 buckets easily and efficiently.
 
+![screenshot](screenshot.png)
+
 ## Features
 
 - User-friendly GUI built with Fyne
