@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	myApp := app.NewWithID("com.example.s3downloader")
+	myApp := app.NewWithID("com.ninenine.s3downloader")
 	myWindow := myApp.NewWindow("S3 Downloader")
 	myWindow.Resize(fyne.NewSize(800, 480))
 

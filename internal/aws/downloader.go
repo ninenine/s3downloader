@@ -113,21 +113,25 @@ func (d *Downloader) downloadWorker(ctx context.Context, bucket, downloadPath st
 		case <-ctx.Done():
 			return
 		default:
-			localPath := filepath.Join(downloadPath, aws.StringValue(file.Key))
+			localFilePath := filepath.Join(downloadPath, aws.StringValue(file.Key))
+			localDir := filepath.Dir(localFilePath)
 
-			if err := fileutils.EnsureDirectoryExists(localPath); err != nil {
+			// Ensure that the directory exists before attempting to create the file
+			if err := fileutils.EnsureDirectoryExists(localDir); err != nil {
 				errChan <- fmt.Errorf("failed to create directory for '%s': %w", aws.StringValue(file.Key), err)
 				continue
 			}
 
-			if fileutils.FileExists(localPath) {
+			// Skip files that already exist
+			if fileutils.FileExists(localFilePath) {
 				atomic.AddInt64(skippedFiles, 1)
 				atomic.AddInt64(processedFiles, 1)
 				progressChan <- progress.Progress{FilesFound: atomic.LoadInt64(processedFiles), FilesDownloaded: atomic.LoadInt64(processedFiles), FilesSkipped: atomic.LoadInt64(skippedFiles)}
 				continue
 			}
 
-			if err := d.downloadFile(ctx, downloader, bucket, file.Key, localPath); err != nil {
+			// Proceed to download the file
+			if err := d.downloadFile(ctx, downloader, bucket, file.Key, localFilePath); err != nil {
 				errChan <- err
 			} else {
 				atomic.AddInt64(processedFiles, 1)
