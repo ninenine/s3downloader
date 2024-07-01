@@ -21,7 +21,7 @@ S3 Downloader is a Go application with a graphical user interface that allows us
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/yourusername/s3downloader.git
+git clone https://github.com/ninenine/s3downloader.git
 cd s3downloader
 ```
 
