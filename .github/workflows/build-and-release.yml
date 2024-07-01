@@ -17,6 +17,10 @@ jobs:
         exclude:
           - os: windows-latest
             goarch: arm64
+          - os: macos-latest
+            goarch: amd64
+          - os: ubuntu-latest
+            goarch: arm64
 
     steps:
       - name: Checkout code
