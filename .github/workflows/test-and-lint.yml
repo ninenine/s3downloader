@@ -8,6 +8,8 @@ on:
     branches:
       - "**"
 
+permissions: write-all
+
 jobs:
   test-and-lint:
     runs-on: ubuntu-latest
