@@ -7,25 +7,28 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
 
     strategy:
       matrix:
-        goos: [linux] # , darwin, windows]
-        goarch: [amd64] #, arm64]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        goarch: [amd64, arm64]
+        exclude:
+          - os: windows-latest
+            goarch: arm64
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
 
       - name: Install system dependencies (Linux only)
-        if: matrix.goos == 'linux'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev xorg-dev
 
       - name: Install system dependencies (macOS only)
-        if: matrix.goos == 'darwin'
+        if: runner.os == 'macOS'
         run: |
           brew install glfw3
 
@@ -36,16 +39,16 @@ jobs:
 
       - name: Build application
         env:
-          GOOS: ${{ matrix.goos }}
+          GOOS: ${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'darwin' || 'linux' }}
           GOARCH: ${{ matrix.goarch }}
         run: |
-          go build -o s3downloader-${{ matrix.goos }}-${{ matrix.goarch }} cmd/main.go
+          go build -o s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }} cmd/main.go
 
       - name: Archive production artifacts
         uses: actions/upload-artifact@v2
         with:
-          name: s3downloader-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: s3downloader-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: s3downloader-${{ runner.os }}-${{ matrix.goarch }}
+          path: s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }}
 
   release:
     needs: build
@@ -54,35 +57,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v2
 
-      - name: Download build artifacts Linux AMD64
+      - name: Download all build artifacts
         uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-linux-amd64
-
-      - name: Download build artifacts Linux ARM64
-        uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-linux-arm64
-
-      - name: Download build artifacts Darwin AMD64
-        uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-darwin-amd64
-
-      - name: Download build artifacts Darwin ARM64
-        uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-darwin-arm64
-
-      - name: Download build artifacts Windows AMD64
-        uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-windows-amd64
-
-      - name: Download build artifacts Windows ARM64
-        uses: actions/download-artifact@v2
-        with:
-          name: s3downloader-windows-arm64
 
       - name: Create GitHub Release
         id: create_release
@@ -95,62 +71,21 @@ jobs:
           draft: false
           prerelease: false
 
-      - name: Upload Release Asset Linux AMD64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Release Assets
+        uses: actions/github-script@v6
         with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-linux-amd64
-          asset_name: s3downloader-linux-amd64
-          asset_content_type: application/octet-stream
+          github-token: ${{secrets.GITHUB_TOKEN}}
+          script: |
+            const fs = require('fs').promises;
+            const glob = require('glob');
 
-      - name: Upload Release Asset Linux ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-linux-arm64
-          asset_name: s3downloader-linux-arm64
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset Darwin AMD64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-darwin-amd64
-          asset_name: s3downloader-darwin-amd64
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset Darwin ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-darwin-arm64
-          asset_name: s3downloader-darwin-arm64
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset Windows AMD64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-windows-amd64
-          asset_name: s3downloader-windows-amd64.exe
-          asset_content_type: application/octet-stream
-
-      - name: Upload Release Asset Windows ARM64
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: s3downloader-windows-arm64
-          asset_name: s3downloader-windows-arm64.exe
-          asset_content_type: application/octet-stream
+            const assets = glob.sync('s3downloader-*');
+            for (const asset of assets) {
+              await github.rest.repos.uploadReleaseAsset({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                release_id: ${{ steps.create_release.outputs.id }},
+                name: asset,
+                data: await fs.readFile(asset)
+              });
+            }
