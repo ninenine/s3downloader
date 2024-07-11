@@ -1,74 +1,76 @@
-name: Go Release
+name: Build and Release
 
 on:
   push:
-    tags:
-      - "v*.*.*" # Triggers the workflow for version tags like v1.0.0
+    branches:
+      - main
 
 jobs:
   build:
+    name: Build
     runs-on: ${{ matrix.os }}
-    continue-on-error: true
-
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
-        goarch: [amd64, arm64]
-        exclude:
-          - os: windows-latest
-            goarch: arm64
-          - os: macos-latest
-            goarch: amd64
-          - os: ubuntu-latest
-            goarch: arm64
-
+        arch: [amd64, arm64]
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
 
-      - name: Install system dependencies (Linux only)
-        if: runner.os == 'Linux'
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.22"
+
+      - name: Install dependencies (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev xorg-dev
 
-      - name: Install system dependencies (macOS only)
-        if: runner.os == 'macOS'
+      - name: Install dependencies (macOS)
+        if: matrix.os == 'macos-latest'
+        run: brew install gcc glfw
+
+      - name: Install fyne
+        run: go install fyne.io/fyne/v2/cmd/fyne@latest
+
+      - name: Build for Linux
+        if: matrix.os == 'ubuntu-latest'
         run: |
-          brew update
-          brew install glfw || true
+          GOOS=linux GOARCH=${{ matrix.arch }} fyne package -sourceDir ./cmd -name "s3downloader" -os linux -icon ../icon.png -appID com.ninenine.s3downloder -release
+          mv *.tar.xz s3downloader-linux-${{ matrix.arch }}.tar.xz
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.22"
-
-      - name: Build application
-        env:
-          GOOS: ${{ runner.os == 'Windows' && 'windows' || runner.os == 'macOS' && 'darwin' || 'linux' }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: Build for Windows
+        if: matrix.os == 'windows-latest'
         run: |
-          go build -o s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }} cmd/main.go
+          $env:GOOS = "windows"
+          $env:GOARCH = "${{ matrix.arch }}"
+          fyne package -sourceDir ./cmd -name "s3downloader" -os windows -icon ../icon.png -appID com.ninenine.s3downloder -release
+          Move-Item *.zip s3downloader-windows-${{ matrix.arch }}.zip
 
-      - name: Archive production artifacts
-        uses: actions/upload-artifact@v4
+      - name: Build for macOS
+        if: matrix.os == 'macos-latest'
+        run: |
+          GOOS=darwin GOARCH=${{ matrix.arch }} fyne package -sourceDir ./cmd -name "s3downloader" -os darwin -icon ../icon.png -appID com.ninenine.s3downloder -release
+          mv *.tar.xz s3downloader-macos-${{ matrix.arch }}.tar.xz
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
         with:
-          name: s3downloader-${{ runner.os }}-${{ matrix.goarch }}
-          path: s3downloader-${{ runner.os }}-${{ matrix.goarch }}${{ runner.os == 'Windows' && '.exe' || '' }}
+          name: s3downloader-${{ matrix.os }}-${{ matrix.arch }}
+          path: s3downloader-*
 
   release:
+    name: Create Release
     needs: build
     runs-on: ubuntu-latest
-    if: success() || failure()
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
 
-      - name: Download all build artifacts
-        uses: actions/download-artifact@v4
-        continue-on-error: true
-
-      - name: Create GitHub Release
+      - name: Create Release
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -80,24 +82,11 @@ jobs:
           prerelease: false
 
       - name: Upload Release Assets
-        uses: actions/github-script@v7
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          github-token: ${{secrets.GITHUB_TOKEN}}
-          script: |
-            const fs = require('fs').promises;
-            const assets = glob.sync('s3downloader-*');
-            for (const asset of assets) {
-              try {
-                const data = await fs.readFile(asset);
-                await github.rest.repos.uploadReleaseAsset({
-                  owner: context.repo.owner,
-                  repo: context.repo.repo,
-                  release_id: ${{ steps.create_release.outputs.id }},
-                  name: asset,
-                  data: data
-                });
-                console.log(`Successfully uploaded ${asset}`);
-              } catch (error) {
-                console.error(`Failed to upload ${asset}: ${error.message}`);
-              }
-            }
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./artifacts
+          asset_name: ${{ runner.os }}-${{ runner.arch }}
+          asset_content_type: application/octet-stream
