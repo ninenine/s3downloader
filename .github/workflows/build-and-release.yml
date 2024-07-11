@@ -21,7 +21,7 @@ jobs:
             arch: arm64
 
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Set up Go
         uses: actions/setup-go@v4
@@ -36,7 +36,7 @@ jobs:
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
-        run: brew install gcc glfw
+        run: brew install glfw
 
       - name: Install fyne
         run: go install fyne.io/fyne/v2/cmd/fyne@latest
@@ -67,6 +67,7 @@ jobs:
       - name: Compress Windows build
         if: matrix.os == 'windows-latest'
         run: |
+          ls
           Compress-Archive -Path *.exe -DestinationPath s3downloader-windows-${{ matrix.arch }}.zip
 
       - name: Compress macOS build
@@ -75,7 +76,7 @@ jobs:
           tar -cvJf s3downloader-macos-${{ matrix.arch }}.tar.xz *.app
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: s3downloader-${{ matrix.os }}-${{ matrix.arch }}
           path: s3downloader-*
@@ -87,7 +88,7 @@ jobs:
     if: always() # Ensure this job runs even if the build job fails
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           path: artifacts
 
