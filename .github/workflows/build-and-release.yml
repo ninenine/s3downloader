@@ -61,23 +61,24 @@ jobs:
       - name: Compress Linux build
         if: matrix.os == 'ubuntu-latest'
         run: |
+          ## TODO: check if build gives a tar.xz file (could be a zip)
           mv *.tar.xz s3downloader-linux-${{ matrix.arch }}.tar.xz
 
       - name: Compress Windows build
         if: matrix.os == 'windows-latest'
         run: |
-          Compress-Archive -Path *.exe, *.dll, *.bin, *.pkg -DestinationPath s3downloader-windows-${{ matrix.arch }}.zip
+          Compress-Archive -Path *.exe -DestinationPath s3downloader-windows-${{ matrix.arch }}.zip
 
       - name: Compress macOS build
         if: matrix.os == 'macos-latest'
         run: |
-          tar -cvJf s3downloader-macos-${{ matrix.arch }}.tar.xz *.app *.dylib *.pkg
+          tar -cvJf s3downloader-macos-${{ matrix.arch }}.tar.xz *.app
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
           name: s3downloader-${{ matrix.os }}-${{ matrix.arch }}
-          path: s3downloader-*.tar.xz, s3downloader-*.zip
+          path: s3downloader-*
 
   release:
     name: Create Release
