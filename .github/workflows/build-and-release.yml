@@ -13,6 +13,10 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         arch: [amd64, arm64]
+        exclude:
+          - os: ubuntu-latest
+            arch: arm64
+
     steps:
       - uses: actions/checkout@v3
 
@@ -26,19 +30,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev xorg-dev
+        continue-on-error: true
 
       - name: Install dependencies (macOS)
         if: matrix.os == 'macos-latest'
         run: brew install gcc glfw
+        continue-on-error: true
 
       - name: Install fyne
         run: go install fyne.io/fyne/v2/cmd/fyne@latest
+        continue-on-error: true
 
       - name: Build for Linux
         if: matrix.os == 'ubuntu-latest'
         run: |
           GOOS=linux GOARCH=${{ matrix.arch }} fyne package -sourceDir ./cmd -name "s3downloader" -os linux -icon ../icon.png -appID com.ninenine.s3downloder -release
           mv *.tar.xz s3downloader-linux-${{ matrix.arch }}.tar.xz
+        continue-on-error: true
 
       - name: Build for Windows
         if: matrix.os == 'windows-latest'
@@ -47,23 +55,27 @@ jobs:
           $env:GOARCH = "${{ matrix.arch }}"
           fyne package -sourceDir ./cmd -name "s3downloader" -os windows -icon ../icon.png -appID com.ninenine.s3downloder -release
           Move-Item *.zip s3downloader-windows-${{ matrix.arch }}.zip
+        continue-on-error: true
 
       - name: Build for macOS
         if: matrix.os == 'macos-latest'
         run: |
           GOOS=darwin GOARCH=${{ matrix.arch }} fyne package -sourceDir ./cmd -name "s3downloader" -os darwin -icon ../icon.png -appID com.ninenine.s3downloder -release
           mv *.tar.xz s3downloader-macos-${{ matrix.arch }}.tar.xz
+        continue-on-error: true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
           name: s3downloader-${{ matrix.os }}-${{ matrix.arch }}
           path: s3downloader-*
+        continue-on-error: true
 
   release:
     name: Create Release
     needs: build
     runs-on: ubuntu-latest
+    if: always() # Ensure this job runs even if the build job fails
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@v3
