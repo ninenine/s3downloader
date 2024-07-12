@@ -43,14 +43,14 @@ func NewDownloader(region, accessKey, secretKey string) (*Downloader, error) {
 // ListAndDownloadObjects lists and downloads S3 objects concurrently
 func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix, downloadPath string, progressChan chan<- progress.Progress) error {
 	const (
-		maxWorkers        = 50
-		chunkSize         = 10 * 1024 * 1024 // 10MB chunks
-		channelBufferSize = 1000
+		maxWorkers        = 100              // Maximum number of workers
+		chunkSize         = 10 * 1024 * 1024 // 10MB chunks for large files
+		channelBufferSize = 2000             // Channel buffer size
 	)
 
 	var (
-		processedFiles int64
 		foundFiles     int64
+		processedFiles int64
 		skippedFiles   int64
 	)
 
@@ -64,15 +64,16 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 		d.Concurrency = 10
 	})
 
-	// Start worker pool
+	// Start worker pool based on file size
 	for i := 0; i < maxWorkers; i++ {
 		wg.Add(1)
-		go d.downloadWorker(ctx, bucket, downloadPath, downloader, fileChan, errChan, &wg, &processedFiles, &skippedFiles, progressChan)
+		go d.downloadWorker(ctx, bucket, downloadPath, downloader, fileChan, errChan, &wg, chunkSize, &processedFiles, &skippedFiles, progressChan)
 	}
 
 	// List objects and send to channel
 	go func() {
 		defer close(fileChan)
+		defer close(doneChan)
 		err := d.s3.ListObjectsV2PagesWithContext(ctx, &s3.ListObjectsV2Input{
 			Bucket: aws.String(bucket),
 			Prefix: aws.String(prefix),
@@ -91,7 +92,6 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 		if err != nil {
 			errChan <- fmt.Errorf("error listing objects: %w", err)
 		}
-		close(doneChan)
 	}()
 
 	go func() {
@@ -119,7 +119,7 @@ func (d *Downloader) ListAndDownloadObjects(ctx context.Context, bucket, prefix,
 
 // downloadWorker processes the download of each file
 func (d *Downloader) downloadWorker(ctx context.Context, bucket, downloadPath string, downloader *s3manager.Downloader,
-	fileChan <-chan *s3.Object, errChan chan<- error, wg *sync.WaitGroup,
+	fileChan <-chan *s3.Object, errChan chan<- error, wg *sync.WaitGroup, chunkSize int64,
 	processedFiles, skippedFiles *int64, progressChan chan<- progress.Progress) {
 	defer wg.Done()
 
@@ -146,18 +146,27 @@ func (d *Downloader) downloadWorker(ctx context.Context, bucket, downloadPath st
 			}
 
 			// Proceed to download the file
-			if err := d.downloadFile(ctx, downloader, bucket, file.Key, localFilePath); err != nil {
-				errChan <- err
+			if aws.Int64Value(file.Size) > chunkSize {
+				if err := d.downloadLargeFile(ctx, downloader, bucket, file.Key, localFilePath); err != nil {
+					errChan <- err
+				} else {
+					atomic.AddInt64(processedFiles, 1)
+					progressChan <- progress.Progress{FilesFound: atomic.LoadInt64(processedFiles), FilesDownloaded: atomic.LoadInt64(processedFiles), FilesSkipped: atomic.LoadInt64(skippedFiles)}
+				}
 			} else {
-				atomic.AddInt64(processedFiles, 1)
-				progressChan <- progress.Progress{FilesFound: atomic.LoadInt64(processedFiles), FilesDownloaded: atomic.LoadInt64(processedFiles), FilesSkipped: atomic.LoadInt64(skippedFiles)}
+				if err := d.downloadSmallFile(ctx, downloader, bucket, file.Key, localFilePath); err != nil {
+					errChan <- err
+				} else {
+					atomic.AddInt64(processedFiles, 1)
+					progressChan <- progress.Progress{FilesFound: atomic.LoadInt64(processedFiles), FilesDownloaded: atomic.LoadInt64(processedFiles), FilesSkipped: atomic.LoadInt64(skippedFiles)}
+				}
 			}
 		}
 	}
 }
 
-// downloadFile downloads a single file from S3
-func (d *Downloader) downloadFile(ctx context.Context, downloader *s3manager.Downloader, bucket string, key *string, localPath string) error {
+// downloadSmallFile downloads a small file (<chunkSize) from S3
+func (d *Downloader) downloadSmallFile(ctx context.Context, downloader *s3manager.Downloader, bucket string, key *string, localPath string) error {
 	f, err := os.Create(localPath)
 	if err != nil {
 		return fmt.Errorf("failed to create file '%s': %w", aws.StringValue(key), err)
@@ -165,6 +174,30 @@ func (d *Downloader) downloadFile(ctx context.Context, downloader *s3manager.Dow
 	defer f.Close()
 
 	downloadCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+
+	_, err = downloader.DownloadWithContext(downloadCtx, f, &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    key,
+	})
+
+	if err != nil {
+		os.Remove(localPath) // Clean up partially downloaded file
+		return fmt.Errorf("failed to download '%s': %w", aws.StringValue(key), err)
+	}
+
+	return nil
+}
+
+// downloadLargeFile downloads a large file (>=chunkSize) from S3 using multipart download
+func (d *Downloader) downloadLargeFile(ctx context.Context, downloader *s3manager.Downloader, bucket string, key *string, localPath string) error {
+	f, err := os.Create(localPath)
+	if err != nil {
+		return fmt.Errorf("failed to create file '%s': %w", aws.StringValue(key), err)
+	}
+	defer f.Close()
+
+	downloadCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
 	defer cancel()
 
 	_, err = downloader.DownloadWithContext(downloadCtx, f, &s3.GetObjectInput{

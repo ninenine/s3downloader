@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"s3downloader/internal/aws"
 	"s3downloader/internal/progress"
@@ -15,10 +16,11 @@ import (
 
 // UIManager struct handles the UI lifecycle and interactions
 type UIManager struct {
-	window     fyne.Window
-	downloader *aws.Downloader
-	components *Components
-	cancelFunc context.CancelFunc
+	window            fyne.Window
+	downloader        *aws.Downloader
+	components        *Components
+	cancelFunc        context.CancelFunc
+	downloadStartTime time.Time
 }
 
 // NewUIManager initializes a new UIManager
@@ -86,6 +88,8 @@ func (u *UIManager) StartDownload() {
 		return
 	}
 
+	u.downloadStartTime = time.Now() // Capture the start time
+
 	progressChan := make(chan progress.Progress, 1)
 	doneChan := make(chan struct{})
 
@@ -97,13 +101,34 @@ func (u *UIManager) downloadFiles(bucket, prefix, downloadPath string, progressC
 	ctx, cancel := context.WithCancel(context.Background())
 	u.cancelFunc = cancel
 
+	var finalProgress progress.Progress
+
 	// Update progress in a separate goroutine
 	go func() {
 		for p := range progressChan {
 			u.updateProgress(p)
+			finalProgress = p // Keep the last progress update for the summary
 		}
 		doneChan <- struct{}{}
 	}()
+
+	/*
+		// List all prefixes (subdirectories)
+		prefixes, err1 := u.downloader.ListPrefixes(bucket, prefix)
+		if err1 != nil {
+			dialog.ShowError(fmt.Errorf("failed to list prefixes: %w", err1), u.window)
+			u.components.StatusLabel.SetText("Failed to list prefixes")
+			close(progressChan)
+			<-doneChan
+			u.enableInputs()
+			return
+		}
+
+		// Print prefies to console
+		for _, p := range prefixes {
+			fmt.Println(p)
+		}
+	*/
 
 	// List and download objects using the downloader
 	err := u.downloader.ListAndDownloadObjects(ctx, bucket, prefix, downloadPath, progressChan)
@@ -115,11 +140,15 @@ func (u *UIManager) downloadFiles(bucket, prefix, downloadPath string, progressC
 	u.components.ProgressBar.Hide()
 	u.enableInputs()
 
+	elapsedTime := time.Since(u.downloadStartTime) // Calculate the elapsed time
+
 	if err != nil {
 		dialog.ShowError(fmt.Errorf("failed to list or download objects: %w", err), u.window)
 		u.components.StatusLabel.SetText("Failed")
 	} else {
-		u.components.StatusLabel.SetText("Download complete")
+		summary := fmt.Sprintf("Download complete\nFiles found: %d\nDownloads: %d\nSkipped: %d\nTime taken: %s",
+			finalProgress.FilesFound, finalProgress.FilesDownloaded, finalProgress.FilesSkipped, formatElapsedTime(elapsedTime))
+		u.components.StatusLabel.SetText(summary)
 	}
 }
 
@@ -139,7 +168,11 @@ func (u *UIManager) updateProgress(p progress.Progress) {
 	} else {
 		u.components.ProgressBar.SetValue(float64(filesDownloaded) / float64(filesFound))
 	}
-	u.components.StatusLabel.SetText(fmt.Sprintf("Files found: %d, Downloaded: %d, Skipped: %d", filesFound, filesDownloaded, p.FilesSkipped))
+
+	elapsedTime := time.Since(u.downloadStartTime) // Calculate the elapsed time
+
+	u.components.StatusLabel.SetText(fmt.Sprintf("Files found: %d, Downloaded: %d, Skipped: %d Elapsed time: %s",
+		filesFound, filesDownloaded, p.FilesSkipped, formatElapsedTime(elapsedTime)))
 	u.window.Canvas().Refresh(u.components.ProgressBar)
 	fyne.CurrentApp().Driver().CanvasForObject(u.components.StatusLabel).Refresh(u.components.StatusLabel)
 }
@@ -166,4 +199,12 @@ func (u *UIManager) enableInputs() {
 		w.Enable()
 	}
 	u.components.StopButton.Hide()
+}
+
+// formatElapsedTime formats a duration into a human-readable string
+func formatElapsedTime(d time.Duration) string {
+	hours := int(d.Hours())
+	minutes := int(d.Minutes()) % 60
+	seconds := int(d.Seconds()) % 60
+	return fmt.Sprintf("%02d:%02d:%02d", hours, minutes, seconds)
 }
