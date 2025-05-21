@@ -1,6 +1,6 @@
 module s3downloader
 
-go 1.22.0
+go 1.24.1
 
 require (
 	fyne.io/fyne/v2 v2.4.5

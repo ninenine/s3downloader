@@ -53,3 +53,5 @@ fyne-cross/
 # For example:
 # /downloads/
 # config.yaml
+
+**/.claude/settings.local.json
